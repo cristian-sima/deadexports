@@ -162,12 +162,22 @@ func reverseReferences(graph *analyzer) map[string][]string {
 	return reverse
 }
 
+func isEnumMember(cfg *config, constObject *types.Const) bool {
+	if !cfg.pruneEnums {
+		return false
+	}
+
+	_, isNamed := constObject.Type().(*types.Named)
+
+	return isNamed
+}
+
 func deletionCandidates(graph *analyzer, deadObjects []types.Object, reached map[string]bool) map[string]token.Pos {
 	candidates := map[string]token.Pos{}
 
 	for _, object := range deadObjects {
-		_, isConst := object.(*types.Const)
-		if isConst && !graph.cfg.pruneEnums {
+		constObject, isConst := object.(*types.Const)
+		if isConst && !isEnumMember(graph.cfg, constObject) {
 			continue
 		}
 

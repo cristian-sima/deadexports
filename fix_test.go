@@ -105,6 +105,29 @@ func main() {}
 	}
 }
 
+func TestPruneEnumsKeepsLoneConst(t *testing.T) {
+	source := `package main
+
+const LoneCode = "abc"
+
+func main() {}
+`
+	files := map[string]string{"main.go": source}
+	dir := writeModule(t, files)
+	loaded := loadModule(t, dir, false)
+	cfg := &config{
+		modulePrefix: sampleModulePath,
+		excludes:     defaultExcludes(),
+		pruneEnums:   true,
+	}
+	fixOnce(cfg, loaded)
+	text := readMainGo(t, dir)
+
+	if !strings.Contains(text, "LoneCode") {
+		t.Errorf("lone untyped const must be kept even with -prune-enums:\n%s", text)
+	}
+}
+
 func readMainGo(t *testing.T, dir string) string {
 	t.Helper()
 
