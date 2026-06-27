@@ -63,7 +63,7 @@ func run(cfg *config, fix bool) {
 		return
 	}
 
-	deadPositions := collectDeadPositions(deadObjects)
+	deadPositions := collectDeletablePositions(graph, loaded, deadObjects)
 
 	rewrittenFiles := applyFix(loaded, deadPositions)
 	for _, name := range rewrittenFiles {

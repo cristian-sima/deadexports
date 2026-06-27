@@ -59,7 +59,7 @@ Flags:
 |------|-----------|---------|
 | `-root <substring>` | yes | package-path substring whose exported decls are entry points (called by a framework via reflection/codegen), always treated as reachable and never reported |
 | `-exclude <substring>` | yes | package-path substring to skip entirely; adds to the built-in defaults (`/vendor/`, `/node_modules/`, `/testdata/`) |
-| `-fix` | — | delete unused exported types/vars/funcs in place (consts are reported only, never deleted) |
+| `-fix` | — | delete unused exported types/vars/funcs in place. Conservative: only declarations with **no remaining references** are removed (consts are never deleted); now-unused imports are pruned automatically |
 
 Example for a Wails app whose `backend/bindings/` packages are invoked from the
 frontend by reflection, with a gitignored dump folder:
@@ -103,6 +103,11 @@ test (correctly kept):
   (types, funcs, vars, consts). A dead method surfaces through its dead type.
 - **Consts are reported, never auto-deleted** — `iota`/enum value semantics make
   blind deletion unsafe; review them by hand.
+- **`-fix` is conservative** — it deletes only declarations with no remaining
+  references anywhere in the module, so it never produces a dangling reference or
+  breaks the build. Dead clusters that reference each other (e.g. a dead type
+  used only by its own methods, or a type used only by its consts) are reported
+  but left for manual removal. Run `-fix` repeatedly to peel successive layers.
 - **Load errors lower confidence** — if some packages fail to type-check,
   referenced symbols can look dead. `deadexports` says so and refuses `-fix`.
 - Run it from the module root; analysis is always over `./...`.

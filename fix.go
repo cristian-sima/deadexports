@@ -10,7 +10,17 @@ import (
 	"os"
 
 	"golang.org/x/tools/go/packages"
+	goimports "golang.org/x/tools/imports"
 )
+
+func pruneImports(filename string, source []byte) []byte {
+	processed, err := goimports.Process(filename, source, nil)
+	if err != nil {
+		return source
+	}
+
+	return processed
+}
 
 func dropComment(removedComments map[*ast.CommentGroup]bool, group *ast.CommentGroup) {
 	if group != nil {
@@ -128,8 +138,30 @@ func pruneFileDeclarations(file *ast.File, deadPositions map[token.Pos]bool, inf
 	return changed
 }
 
-func collectDeadPositions(deadObjects []types.Object) map[token.Pos]bool {
-	deadPositions := map[token.Pos]bool{}
+func referencedObjectPositions(loaded []*packages.Package, cfg *config) map[token.Pos]bool {
+	referenced := map[token.Pos]bool{}
+
+	for _, pkg := range loaded {
+		if pkg.TypesInfo == nil {
+			continue
+		}
+
+		for _, object := range pkg.TypesInfo.Uses {
+			unresolved := object == nil || object.Pkg() == nil
+			if unresolved || !cfg.isModulePackage(object.Pkg().Path()) {
+				continue
+			}
+
+			referenced[object.Pos()] = true
+		}
+	}
+
+	return referenced
+}
+
+func collectDeletablePositions(graph *analyzer, loaded []*packages.Package, deadObjects []types.Object) map[token.Pos]bool {
+	referenced := referencedObjectPositions(loaded, graph.cfg)
+	deletable := map[token.Pos]bool{}
 
 	for _, object := range deadObjects {
 		_, isConst := object.(*types.Const)
@@ -137,10 +169,14 @@ func collectDeadPositions(deadObjects []types.Object) map[token.Pos]bool {
 			continue
 		}
 
-		deadPositions[object.Pos()] = true
+		if referenced[object.Pos()] {
+			continue
+		}
+
+		deletable[object.Pos()] = true
 	}
 
-	return deadPositions
+	return deletable
 }
 
 func applyFix(loaded []*packages.Package, deadPositions map[token.Pos]bool) []string {
@@ -165,7 +201,9 @@ func applyFix(loaded []*packages.Package, deadPositions map[token.Pos]bool) []st
 				continue
 			}
 
-			if err := os.WriteFile(position.Filename, buffer.Bytes(), 0o644); err != nil {
+			output := pruneImports(position.Filename, buffer.Bytes())
+
+			if err := os.WriteFile(position.Filename, output, 0o644); err != nil {
 				fmt.Printf("write %s: %s\n", position.Filename, err.Error())
 
 				continue
