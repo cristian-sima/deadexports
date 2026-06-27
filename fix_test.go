@@ -54,6 +54,68 @@ func main() {}
 	}
 }
 
+func TestPruneEnumsDeletesWholeDeadEnum(t *testing.T) {
+	source := `package main
+
+type Color uint8
+
+const (
+	Red Color = iota
+	Green
+	Blue
+)
+
+func main() {}
+`
+	names := []string{"Color", "Red", "Green", "Blue"}
+
+	keptDir := writeModule(t, map[string]string{"main.go": source})
+	keptLoaded := loadModule(t, keptDir, false)
+	keptCfg := &config{
+		modulePrefix: sampleModulePath,
+		excludes:     defaultExcludes(),
+	}
+	fixOnce(keptCfg, keptLoaded)
+	keptText := readMainGo(t, keptDir)
+
+	for _, name := range names {
+		if !strings.Contains(keptText, name) {
+			t.Errorf("without -prune-enums, %s must be kept:\n%s", name, keptText)
+		}
+	}
+
+	prunedDir := writeModule(t, map[string]string{"main.go": source})
+	prunedLoaded := loadModule(t, prunedDir, false)
+	prunedCfg := &config{
+		modulePrefix: sampleModulePath,
+		excludes:     defaultExcludes(),
+		pruneEnums:   true,
+	}
+	fixOnce(prunedCfg, prunedLoaded)
+	prunedText := readMainGo(t, prunedDir)
+
+	for _, name := range names {
+		if strings.Contains(prunedText, name) {
+			t.Errorf("with -prune-enums, whole-dead enum member %s must be deleted:\n%s", name, prunedText)
+		}
+	}
+
+	if !strings.Contains(prunedText, "func main") {
+		t.Errorf("main must remain:\n%s", prunedText)
+	}
+}
+
+func readMainGo(t *testing.T, dir string) string {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatalf("read back: %s", err.Error())
+	}
+
+	return string(content)
+}
+
 func TestFixKeepsReferencedDeadExport(t *testing.T) {
 	source := `package main
 

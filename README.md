@@ -62,6 +62,7 @@ Flags:
 | `-fix` | — | delete unused exported types/vars/funcs in place. Conservative: only declarations with **no remaining references** are removed (consts are never deleted); now-unused imports are pruned automatically |
 | `-loop` | — | with `-fix`, repeat until a pass deletes nothing — peels dead clusters layer by layer (capped at 25 passes as an infinite-loop safeguard) |
 | `-include-unexported` | — | also report/delete dead **unexported** declarations. Cruder than staticcheck on reflection and build tags, so gate it with a build check + VCS checkpoint |
+| `-prune-enums` | — | with `-fix`, delete a **whole-dead enum** (a named type plus *all* its consts) as a single unit. Safe — the entire group is unreachable, so no `iota` gap is left behind |
 
 Example for a Wails app whose `backend/bindings/` packages are invoked from the
 frontend by reflection, with a gitignored dump folder:
@@ -103,8 +104,10 @@ test (correctly kept):
 
 - **Methods are not reported on their own** — only the package-scope decls
   (types, funcs, vars, consts). A dead method surfaces through its dead type.
-- **Consts are reported, never auto-deleted** — `iota`/enum value semantics make
-  blind deletion unsafe; review them by hand.
+- **Consts are reported, never auto-deleted** by default — `iota`/enum value
+  semantics make blind deletion unsafe; review them by hand. The exception is
+  `-prune-enums`, which removes a named type together with *all* its consts only
+  when the entire enum is dead (no gap can result).
 - **`-fix` is conservative** — it deletes only declarations with no remaining
   references anywhere in the module, so it never produces a dangling reference or
   breaks the build. Dead clusters that reference each other (e.g. a dead type

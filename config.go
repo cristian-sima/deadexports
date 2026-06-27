@@ -11,6 +11,7 @@ type config struct {
 	roots             []string
 	excludes          []string
 	includeUnexported bool
+	pruneEnums        bool
 }
 
 type stringList []string

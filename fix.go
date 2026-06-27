@@ -171,6 +171,82 @@ func referencedObjectPositions(loaded []*packages.Package, cfg *config) map[toke
 	return referenced
 }
 
+func reverseReferences(graph *analyzer) map[string][]string {
+	reverse := map[string][]string{}
+
+	for from, targets := range graph.edges {
+		for _, target := range targets {
+			reverse[target] = append(reverse[target], from)
+		}
+	}
+
+	return reverse
+}
+
+func clusterFullyContained(reverse map[string][]string, cluster map[string]bool) bool {
+	for position := range cluster {
+		for _, referencer := range reverse[position] {
+			if !cluster[referencer] {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func deadEnumClusterPositions(graph *analyzer, deadObjects []types.Object) map[token.Pos]bool {
+	deadTypePositions := map[string]bool{}
+	membersByType := map[*types.TypeName][]types.Object{}
+
+	for _, object := range deadObjects {
+		typeName, isType := object.(*types.TypeName)
+		if isType {
+			deadTypePositions[graph.positionOf(typeName)] = true
+
+			continue
+		}
+
+		constObject, isConst := object.(*types.Const)
+		if !isConst {
+			continue
+		}
+
+		named, isNamed := constObject.Type().(*types.Named)
+		if !isNamed {
+			continue
+		}
+
+		membersByType[named.Obj()] = append(membersByType[named.Obj()], constObject)
+	}
+
+	reverse := reverseReferences(graph)
+	result := map[token.Pos]bool{}
+
+	for typeName, members := range membersByType {
+		typePosition := graph.positionOf(typeName)
+		if !deadTypePositions[typePosition] {
+			continue
+		}
+
+		cluster := map[string]bool{typePosition: true}
+		for _, member := range members {
+			cluster[graph.positionOf(member)] = true
+		}
+
+		if !clusterFullyContained(reverse, cluster) {
+			continue
+		}
+
+		result[typeName.Pos()] = true
+		for _, member := range members {
+			result[member.Pos()] = true
+		}
+	}
+
+	return result
+}
+
 func collectDeletablePositions(graph *analyzer, loaded []*packages.Package, deadObjects []types.Object) map[token.Pos]bool {
 	referenced := referencedObjectPositions(loaded, graph.cfg)
 	deletable := map[token.Pos]bool{}
@@ -186,6 +262,12 @@ func collectDeletablePositions(graph *analyzer, loaded []*packages.Package, dead
 		}
 
 		deletable[object.Pos()] = true
+	}
+
+	if graph.cfg.pruneEnums {
+		for position := range deadEnumClusterPositions(graph, deadObjects) {
+			deletable[position] = true
+		}
 	}
 
 	return deletable

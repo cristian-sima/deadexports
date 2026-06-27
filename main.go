@@ -118,16 +118,19 @@ func main() {
 	fix := flag.Bool("fix", false, "delete unused exported types/vars/funcs (consts are reported only)")
 	loop := flag.Bool("loop", false, "with -fix, repeat until a pass deletes nothing (fixpoint)")
 	includeUnexported := flag.Bool("include-unexported", false, "also report/delete dead unexported declarations (cruder than staticcheck on reflection and build tags)")
+	pruneEnums := flag.Bool("prune-enums", false, "with -fix, delete a whole-dead enum (named type plus all its consts) as a unit")
 
 	flag.Parse()
 
 	allExcludes := append(defaultExcludes(), excludes...)
 	wantUnexported := *includeUnexported
+	wantPruneEnums := *pruneEnums
 	cfg := &config{
 		modulePrefix:      "",
 		roots:             roots,
 		excludes:          allExcludes,
 		includeUnexported: wantUnexported,
+		pruneEnums:        wantPruneEnums,
 	}
 
 	run(cfg, *fix, *loop)
