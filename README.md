@@ -60,6 +60,8 @@ Flags:
 | `-root <substring>` | yes | package-path substring whose exported decls are entry points (called by a framework via reflection/codegen), always treated as reachable and never reported |
 | `-exclude <substring>` | yes | package-path substring to skip entirely; adds to the built-in defaults (`/vendor/`, `/node_modules/`, `/testdata/`) |
 | `-fix` | — | delete unused exported types/vars/funcs in place. Conservative: only declarations with **no remaining references** are removed (consts are never deleted); now-unused imports are pruned automatically |
+| `-loop` | — | with `-fix`, repeat until a pass deletes nothing — peels dead clusters layer by layer (capped at 25 passes as an infinite-loop safeguard) |
+| `-include-unexported` | — | also report/delete dead **unexported** declarations. Cruder than staticcheck on reflection and build tags, so gate it with a build check + VCS checkpoint |
 
 Example for a Wails app whose `backend/bindings/` packages are invoked from the
 frontend by reflection, with a gitignored dump folder:
@@ -106,8 +108,12 @@ test (correctly kept):
 - **`-fix` is conservative** — it deletes only declarations with no remaining
   references anywhere in the module, so it never produces a dangling reference or
   breaks the build. Dead clusters that reference each other (e.g. a dead type
-  used only by its own methods, or a type used only by its consts) are reported
-  but left for manual removal. Run `-fix` repeatedly to peel successive layers.
+  used only by its own methods, or a type used only by its consts) are kept on a
+  single pass. Use `-loop` to peel them: each pass exposes the next layer.
+- **Clusters held alive by dead unexported code** stay until that code is
+  removed. `-include-unexported` lets deadexports delete it too; combined with
+  `-loop` this drives most dead clusters to zero. Always re-run `go build` after
+  (`-include-unexported` is cruder than staticcheck on reflection/build tags).
 - **Load errors lower confidence** — if some packages fail to type-check,
   referenced symbols can look dead. `deadexports` says so and refuses `-fix`.
 - Run it from the module root; analysis is always over `./...`.

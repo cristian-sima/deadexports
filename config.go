@@ -7,9 +7,10 @@ import (
 )
 
 type config struct {
-	modulePrefix string
-	roots        []string
-	excludes     []string
+	modulePrefix      string
+	roots             []string
+	excludes          []string
+	includeUnexported bool
 }
 
 type stringList []string

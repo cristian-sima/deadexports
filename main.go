@@ -12,6 +12,8 @@ import (
 	goPackages "golang.org/x/tools/go/packages"
 )
 
+const maxFixPasses = 25
+
 func loadPackages() ([]*goPackages.Package, error) {
 	loadMode := goPackages.NeedName | goPackages.NeedFiles | goPackages.NeedSyntax | goPackages.NeedTypes | goPackages.NeedTypesInfo | goPackages.NeedImports | goPackages.NeedDeps | goPackages.NeedModule
 	loadConfig := &goPackages.Config{
@@ -22,7 +24,53 @@ func loadPackages() ([]*goPackages.Package, error) {
 	return goPackages.Load(loadConfig, "./...")
 }
 
-func run(cfg *config, fix bool) {
+func reportOnce(cfg *config, loaded []*goPackages.Package) {
+	fileSet := pickFileSet(loaded)
+	graph := newAnalyzer(fileSet, cfg)
+	graph.build(loaded)
+	reached := graph.reachable()
+	deadObjects := collectDeadObjects(graph, loaded, reached)
+	reportFindings(fileSet, deadObjects)
+}
+
+func runFixPasses(cfg *config, loaded []*goPackages.Package, loop bool) {
+	maxPasses := 1
+	if loop {
+		maxPasses = maxFixPasses
+	}
+
+	total := 0
+	for pass := 0; pass < maxPasses; pass++ {
+		if pass > 0 {
+			reloaded, err := loadPackages()
+			if err != nil {
+				fmt.Printf("load: %s\n", err.Error())
+
+				break
+			}
+
+			loaded = reloaded
+		}
+
+		deleted := fixOnce(cfg, loaded)
+		total += deleted
+
+		fmt.Printf("pass %d: deleted %d declarations\n", pass+1, deleted)
+
+		if deleted == 0 {
+			break
+		}
+
+		exhausted := loop && pass+1 == maxPasses
+		if exhausted {
+			fmt.Printf("reached max %d passes — stopping (may not be a fixpoint)\n", maxPasses)
+		}
+	}
+
+	fmt.Printf("\ntotal: deleted %d declarations\n", total)
+}
+
+func run(cfg *config, fix bool, loop bool) {
 	loaded, err := loadPackages()
 	if err != nil {
 		fmt.Printf("load: %s\n", err.Error())
@@ -37,8 +85,6 @@ func run(cfg *config, fix bool) {
 		return
 	}
 
-	fileSet := pickFileSet(loaded)
-
 	errorCount := reportLoadErrors(loaded)
 	if errorCount > 0 {
 		fmt.Printf("\n%d load errors — coverage incomplete, referenced symbols may look dead. ", errorCount)
@@ -52,25 +98,13 @@ func run(cfg *config, fix bool) {
 		fmt.Printf("Report is LOW CONFIDENCE.\n\n")
 	}
 
-	graph := newAnalyzer(fileSet, cfg)
-	graph.build(loaded)
-	reached := graph.reachable()
-
-	deadObjects := collectDeadObjects(graph, loaded, reached)
 	if !fix {
-		reportFindings(fileSet, deadObjects)
+		reportOnce(cfg, loaded)
 
 		return
 	}
 
-	deadPositions := collectDeletablePositions(graph, loaded, deadObjects)
-
-	rewrittenFiles := applyFix(loaded, deadPositions)
-	for _, name := range rewrittenFiles {
-		fmt.Printf("rewrote %s\n", name)
-	}
-
-	fmt.Printf("\ndeleted %d type/var/func declarations across %d files (consts skipped — see report mode)\n", len(deadPositions), len(rewrittenFiles))
+	runFixPasses(cfg, loaded, loop)
 }
 
 func main() {
@@ -82,15 +116,19 @@ func main() {
 	flag.Var(&roots, "root", "package path substring whose exported decls are entry points, always reachable (repeatable)")
 	flag.Var(&excludes, "exclude", "package path substring to skip entirely (repeatable; adds to defaults)")
 	fix := flag.Bool("fix", false, "delete unused exported types/vars/funcs (consts are reported only)")
+	loop := flag.Bool("loop", false, "with -fix, repeat until a pass deletes nothing (fixpoint)")
+	includeUnexported := flag.Bool("include-unexported", false, "also report/delete dead unexported declarations (cruder than staticcheck on reflection and build tags)")
 
 	flag.Parse()
 
 	allExcludes := append(defaultExcludes(), excludes...)
+	wantUnexported := *includeUnexported
 	cfg := &config{
-		modulePrefix: "",
-		roots:        roots,
-		excludes:     allExcludes,
+		modulePrefix:      "",
+		roots:             roots,
+		excludes:          allExcludes,
+		includeUnexported: wantUnexported,
 	}
 
-	run(cfg, *fix)
+	run(cfg, *fix, *loop)
 }

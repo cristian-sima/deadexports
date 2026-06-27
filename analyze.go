@@ -276,7 +276,7 @@ func collectDeadObjects(graph *analyzer, loaded []*packages.Package, reached map
 		scope := pkg.Types.Scope()
 		for _, name := range scope.Names() {
 			object := scope.Lookup(name)
-			if !object.Exported() {
+			if !object.Exported() && !graph.cfg.includeUnexported {
 				continue
 			}
 

@@ -138,6 +138,18 @@ func pruneFileDeclarations(file *ast.File, deadPositions map[token.Pos]bool, inf
 	return changed
 }
 
+func fixOnce(cfg *config, loaded []*packages.Package) int {
+	fileSet := pickFileSet(loaded)
+	graph := newAnalyzer(fileSet, cfg)
+	graph.build(loaded)
+	reached := graph.reachable()
+	deadObjects := collectDeadObjects(graph, loaded, reached)
+	deletable := collectDeletablePositions(graph, loaded, deadObjects)
+	applyFix(loaded, deletable)
+
+	return len(deletable)
+}
+
 func referencedObjectPositions(loaded []*packages.Package, cfg *config) map[token.Pos]bool {
 	referenced := map[token.Pos]bool{}
 

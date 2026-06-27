@@ -7,6 +7,53 @@ import (
 	"testing"
 )
 
+func TestFixLoopClearsDeadChain(t *testing.T) {
+	source := `package main
+
+func Top() { mid() }
+
+func mid() { Leaf() }
+
+func Leaf() {}
+
+func main() {}
+`
+	files := map[string]string{"main.go": source}
+	dir := writeModule(t, files)
+	cfg := &config{
+		modulePrefix:      sampleModulePath,
+		excludes:          defaultExcludes(),
+		includeUnexported: true,
+	}
+
+	passes := 0
+	for passes < 10 {
+		loaded := loadModule(t, dir, false)
+		deleted := fixOnce(cfg, loaded)
+		if deleted == 0 {
+			break
+		}
+
+		passes++
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatalf("read back: %s", err.Error())
+	}
+	text := string(content)
+
+	for _, name := range []string{"Top", "mid", "Leaf"} {
+		if strings.Contains(text, "func "+name) {
+			t.Errorf("expected %s removed after loop, still present:\n%s", name, text)
+		}
+	}
+
+	if !strings.Contains(text, "func main") {
+		t.Errorf("main must remain:\n%s", text)
+	}
+}
+
 func TestFixKeepsReferencedDeadExport(t *testing.T) {
 	source := `package main
 

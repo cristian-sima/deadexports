@@ -22,6 +22,22 @@ func TestStringListAppends(t *testing.T) {
 	}
 }
 
+func TestIncludeUnexportedDetectsDeadUnexported(t *testing.T) {
+	source := `package main
+
+func helper() {}
+
+func main() {}
+`
+	files := map[string]string{"main.go": source}
+
+	deadDefault := deadNamesFor(t, files, &config{}, false)
+	assertLive(t, deadDefault, "helper")
+
+	deadIncluded := deadNamesFor(t, files, &config{includeUnexported: true}, false)
+	assertDead(t, deadIncluded, "helper")
+}
+
 func TestConfigMatchers(t *testing.T) {
 	cfg := &config{
 		modulePrefix: "example.com/app",
