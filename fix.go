@@ -144,31 +144,10 @@ func fixOnce(cfg *config, loaded []*packages.Package) int {
 	graph.build(loaded)
 	reached := graph.reachable()
 	deadObjects := collectDeadObjects(graph, loaded, reached)
-	deletable := collectDeletablePositions(graph, loaded, deadObjects)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
 	applyFix(loaded, deletable)
 
 	return len(deletable)
-}
-
-func referencedObjectPositions(loaded []*packages.Package, cfg *config) map[token.Pos]bool {
-	referenced := map[token.Pos]bool{}
-
-	for _, pkg := range loaded {
-		if pkg.TypesInfo == nil {
-			continue
-		}
-
-		for _, object := range pkg.TypesInfo.Uses {
-			unresolved := object == nil || object.Pkg() == nil
-			if unresolved || !cfg.isModulePackage(object.Pkg().Path()) {
-				continue
-			}
-
-			referenced[object.Pos()] = true
-		}
-	}
-
-	return referenced
 }
 
 func reverseReferences(graph *analyzer) map[string][]string {
@@ -183,91 +162,60 @@ func reverseReferences(graph *analyzer) map[string][]string {
 	return reverse
 }
 
-func clusterFullyContained(reverse map[string][]string, cluster map[string]bool) bool {
-	for position := range cluster {
-		for _, referencer := range reverse[position] {
-			if !cluster[referencer] {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-func deadEnumClusterPositions(graph *analyzer, deadObjects []types.Object) map[token.Pos]bool {
-	deadTypePositions := map[string]bool{}
-	membersByType := map[*types.TypeName][]types.Object{}
-
-	for _, object := range deadObjects {
-		typeName, isType := object.(*types.TypeName)
-		if isType {
-			deadTypePositions[graph.positionOf(typeName)] = true
-
-			continue
-		}
-
-		constObject, isConst := object.(*types.Const)
-		if !isConst {
-			continue
-		}
-
-		named, isNamed := constObject.Type().(*types.Named)
-		if !isNamed {
-			continue
-		}
-
-		membersByType[named.Obj()] = append(membersByType[named.Obj()], constObject)
-	}
-
-	reverse := reverseReferences(graph)
-	result := map[token.Pos]bool{}
-
-	for typeName, members := range membersByType {
-		typePosition := graph.positionOf(typeName)
-		if !deadTypePositions[typePosition] {
-			continue
-		}
-
-		cluster := map[string]bool{typePosition: true}
-		for _, member := range members {
-			cluster[graph.positionOf(member)] = true
-		}
-
-		if !clusterFullyContained(reverse, cluster) {
-			continue
-		}
-
-		result[typeName.Pos()] = true
-		for _, member := range members {
-			result[member.Pos()] = true
-		}
-	}
-
-	return result
-}
-
-func collectDeletablePositions(graph *analyzer, loaded []*packages.Package, deadObjects []types.Object) map[token.Pos]bool {
-	referenced := referencedObjectPositions(loaded, graph.cfg)
-	deletable := map[token.Pos]bool{}
+func deletionCandidates(graph *analyzer, deadObjects []types.Object, reached map[string]bool) map[string]token.Pos {
+	candidates := map[string]token.Pos{}
 
 	for _, object := range deadObjects {
 		_, isConst := object.(*types.Const)
-		if isConst {
+		if isConst && !graph.cfg.pruneEnums {
 			continue
 		}
 
-		if referenced[object.Pos()] {
-			continue
-		}
-
-		deletable[object.Pos()] = true
+		candidates[graph.positionOf(object)] = object.Pos()
 	}
 
-	if graph.cfg.pruneEnums {
-		for position := range deadEnumClusterPositions(graph, deadObjects) {
-			deletable[position] = true
+	for position, method := range graph.methods {
+		if !reached[position] {
+			candidates[position] = method.Pos()
 		}
+	}
+
+	return candidates
+}
+
+func hasSurvivingReferencer(referencers []string, candidates map[string]token.Pos) bool {
+	for _, referencer := range referencers {
+		if _, willDelete := candidates[referencer]; !willDelete {
+			return true
+		}
+	}
+
+	return false
+}
+
+func collectDeletablePositions(graph *analyzer, deadObjects []types.Object, reached map[string]bool) map[token.Pos]bool {
+	candidates := deletionCandidates(graph, deadObjects, reached)
+	reverse := reverseReferences(graph)
+
+	for {
+		changed := false
+
+		for position := range candidates {
+			if hasSurvivingReferencer(reverse[position], candidates) {
+				delete(candidates, position)
+
+				changed = true
+			}
+		}
+
+		if !changed {
+			break
+		}
+	}
+
+	deletable := map[token.Pos]bool{}
+	for _, position := range candidates {
+		deletable[position] = true
 	}
 
 	return deletable

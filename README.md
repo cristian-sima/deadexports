@@ -108,11 +108,12 @@ test (correctly kept):
   semantics make blind deletion unsafe; review them by hand. The exception is
   `-prune-enums`, which removes a named type together with *all* its consts only
   when the entire enum is dead (no gap can result).
-- **`-fix` is conservative** — it deletes only declarations with no remaining
-  references anywhere in the module, so it never produces a dangling reference or
-  breaks the build. Dead clusters that reference each other (e.g. a dead type
-  used only by its own methods, or a type used only by its consts) are kept on a
-  single pass. Use `-loop` to peel them: each pass exposes the next layer.
+- **`-fix` is safe by construction** — a declaration is removed only when every
+  reference to it comes from another declaration that is also being removed
+  (a greatest-fixpoint over the reference graph), so it never leaves a dangling
+  reference or breaks the build. This deletes whole dead **clusters** as a unit:
+  mutually-referencing dead types, and a dead type together with its methods.
+  Const-bearing enums are the exception — see `-prune-enums`.
 - **Clusters held alive by dead unexported code** stay until that code is
   removed. `-include-unexported` lets deadexports delete it too; combined with
   `-loop` this drives most dead clusters to zero. Always re-run `go build` after

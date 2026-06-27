@@ -116,6 +116,70 @@ func readMainGo(t *testing.T, dir string) string {
 	return string(content)
 }
 
+func TestFixDeletesMutualTypeCluster(t *testing.T) {
+	source := `package main
+
+type Node struct{ edge *Edge }
+
+type Edge struct{ node *Node }
+
+func main() {}
+`
+	files := map[string]string{"main.go": source}
+	dir := writeModule(t, files)
+	loaded := loadModule(t, dir, false)
+	fileSet := pickFileSet(loaded)
+	cfg := &config{
+		modulePrefix: sampleModulePath,
+		excludes:     defaultExcludes(),
+	}
+	graph := newAnalyzer(fileSet, cfg)
+	graph.build(loaded)
+	reached := graph.reachable()
+	deadObjects := collectDeadObjects(graph, loaded, reached)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
+	applyFix(loaded, deletable)
+	text := readMainGo(t, dir)
+
+	for _, name := range []string{"Node", "Edge"} {
+		if strings.Contains(text, "type "+name) {
+			t.Errorf("expected mutual-cluster type %s deleted:\n%s", name, text)
+		}
+	}
+}
+
+func TestFixDeletesDeadTypeWithMethod(t *testing.T) {
+	source := `package main
+
+type Box struct{}
+
+func (box Box) Size() int { return 0 }
+
+func main() {}
+`
+	files := map[string]string{"main.go": source}
+	dir := writeModule(t, files)
+	loaded := loadModule(t, dir, false)
+	fileSet := pickFileSet(loaded)
+	cfg := &config{
+		modulePrefix: sampleModulePath,
+		excludes:     defaultExcludes(),
+	}
+	graph := newAnalyzer(fileSet, cfg)
+	graph.build(loaded)
+	reached := graph.reachable()
+	deadObjects := collectDeadObjects(graph, loaded, reached)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
+	applyFix(loaded, deletable)
+	text := readMainGo(t, dir)
+
+	for _, fragment := range []string{"type Box", "func (box Box) Size"} {
+		if strings.Contains(text, fragment) {
+			t.Errorf("expected %q deleted (dead type + its method):\n%s", fragment, text)
+		}
+	}
+}
+
 func TestFixKeepsReferencedDeadExport(t *testing.T) {
 	source := `package main
 
@@ -138,7 +202,7 @@ func main() {}
 	reached := graph.reachable()
 	deadObjects := collectDeadObjects(graph, loaded, reached)
 
-	deletable := collectDeletablePositions(graph, loaded, deadObjects)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
 	applyFix(loaded, deletable)
 
 	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
@@ -177,7 +241,7 @@ func main() {}
 	graph.build(loaded)
 	reached := graph.reachable()
 	deadObjects := collectDeadObjects(graph, loaded, reached)
-	deletable := collectDeletablePositions(graph, loaded, deadObjects)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
 	applyFix(loaded, deletable)
 
 	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
@@ -221,7 +285,7 @@ func main() { Kept() }
 	reached := graph.reachable()
 	deadObjects := collectDeadObjects(graph, loaded, reached)
 
-	deletable := collectDeletablePositions(graph, loaded, deadObjects)
+	deletable := collectDeletablePositions(graph, deadObjects, reached)
 	rewritten := applyFix(loaded, deletable)
 	if len(rewritten) != 1 {
 		t.Fatalf("expected 1 rewritten file, got %d", len(rewritten))

@@ -14,6 +14,7 @@ type analyzer struct {
 	cfg     *config
 	edges   map[string][]string
 	roots   map[string]bool
+	methods map[string]types.Object
 }
 
 func newAnalyzer(fileSet *token.FileSet, cfg *config) *analyzer {
@@ -22,6 +23,7 @@ func newAnalyzer(fileSet *token.FileSet, cfg *config) *analyzer {
 		cfg:     cfg,
 		edges:   map[string][]string{},
 		roots:   map[string]bool{},
+		methods: map[string]types.Object{},
 	}
 }
 
@@ -113,6 +115,8 @@ func (graph *analyzer) processFunc(pkg *packages.Package, funcDecl *ast.FuncDecl
 	}
 
 	if funcDecl.Recv != nil {
+		graph.methods[node] = object
+
 		receiverNode := graph.receiverTypeNode(pkg, funcDecl.Recv)
 		if receiverNode != "" {
 			graph.addEdge([]string{receiverNode}, node)
